@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
 import kotlin.math.max
@@ -15,17 +16,18 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
     private var heads: List<HeadCounter.Tracked> = emptyList()
     private var imgW = 1
     private var imgH = 1
+    private val d = resources.displayMetrics.density
 
-    private val boxPaint = Paint().apply {
+    private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 6f
-        isAntiAlias = true
+        strokeWidth = 2.5f * d
     }
-    private val textPaint = Paint().apply {
-        color = Color.WHITE
-        textSize = 40f
-        isAntiAlias = true
-        setShadowLayer(4f, 0f, 0f, Color.BLACK)
+    private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#0F172A")
+        textSize = 10f * d
+        typeface = Typeface.DEFAULT_BOLD
+        textAlign = Paint.Align.CENTER
     }
 
     fun setHeads(newHeads: List<HeadCounter.Tracked>, imageWidth: Int, imageHeight: Int) {
@@ -46,21 +48,36 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
         val scale = max(width / imgW.toFloat(), height / imgH.toFloat())
         val dx = (width - imgW * scale) / 2f
         val dy = (height - imgH * scale) / 2f
+        val radius = 5f * d
 
         for (h in heads) {
             val r = RectF(
                 h.head.left * scale + dx, h.head.top * scale + dy,
                 h.head.right * scale + dx, h.head.bottom * scale + dy
             )
-            boxPaint.color = when {
-                h.personNumber != null -> Color.GREEN   // counted
-                h.scanning -> Color.YELLOW              // confirming
-                else -> Color.CYAN                      // preview only
+            val color = when {
+                h.personNumber != null -> COUNTED
+                h.scanning -> CONFIRMING
+                else -> PREVIEW
             }
-            canvas.drawRect(r, boxPaint)
+            boxPaint.color = color
+            canvas.drawRoundRect(r, radius, radius, boxPaint)
+
             if (h.personNumber != null) {
-                canvas.drawText("#${h.personNumber}", r.left + 8f, r.top - 12f, textPaint)
+                val label = h.personNumber.toString()
+                val cw = max(16f * d, textPaint.measureText(label) + 8f * d)
+                val ch = 14f * d
+                val chip = RectF(r.centerX() - cw / 2f, r.top - ch - 2f * d, r.centerX() + cw / 2f, r.top - 2f * d)
+                chipPaint.color = color
+                canvas.drawRoundRect(chip, ch / 2f, ch / 2f, chipPaint)
+                canvas.drawText(label, chip.centerX(), chip.centerY() + textPaint.textSize / 3f, textPaint)
             }
         }
+    }
+
+    companion object {
+        val COUNTED: Int = Color.parseColor("#22D3A6")     // green  = counted
+        val CONFIRMING: Int = Color.parseColor("#FBBF24")  // amber  = confirming
+        val PREVIEW: Int = Color.parseColor("#E2E8F0")     // white  = just looking
     }
 }

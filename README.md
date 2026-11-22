@@ -1,6 +1,6 @@
 # Peñaranda Branch Attendance Detector
 
-Android app: opens the camera, finds people (front, side or back), draws a box on each HEAD,
+Android app: opens the camera, finds people in crowds (front, side or back), draws a box on each HEAD,
 counts each person once, and "Show count" displays the total.
 
 ## Get the APK (no Android Studio needed)
@@ -14,3 +14,5 @@ Open this folder (needs internet the first time, it downloads the detection mode
 ## Using it
 Allow the camera > Start scan > sweep the camera over the people > Show count.
 Boxes: cyan = seen (not scanning), yellow = confirming, green + #n = counted.
+
+Detection model: YOLOv8n trained on CrowdHuman (AGPL-3.0, CrowdHuman dataset is non-commercial research use) from github.com/yakhyo/people-tracker releases. Fine for school/personal use; check the licences before any commercial release.

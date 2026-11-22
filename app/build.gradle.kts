@@ -28,18 +28,17 @@ android {
         jvmTarget = "17"
     }
     androidResources {
-        noCompress += "tflite"
+        noCompress += "onnx"
     }
 }
 
-// Downloads the person-detection model (about 7 MB) the first time you build
-val modelFile = layout.projectDirectory.file("src/main/assets/efficientdet_lite0.tflite").asFile
+// Downloads the crowd person-detection model (about 12 MB) the first time you build
+val modelFile = layout.projectDirectory.file("src/main/assets/crowd_model.onnx").asFile
 val downloadModel by tasks.registering {
     doLast {
         if (!modelFile.exists()) {
             modelFile.parentFile.mkdirs()
-            val url = "https://storage.googleapis.com/mediapipe-models/object_detector/" +
-                "efficientdet_lite0/float16/1/efficientdet_lite0.tflite"
+            val url = "https://github.com/yakhyo/people-tracker/releases/download/weights/yolov8n.onnx"
             uri(url).toURL().openStream().use { input ->
                 modelFile.outputStream().use { out -> input.copyTo(out) }
             }
@@ -58,6 +57,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
 
-    // MediaPipe object detector (finds people; model is bundled in the app, works offline)
-    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    // Runs the crowd detection model on the phone (offline)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.19.2")
+
+    // Modern look (buttons, cards, dialogs)
+    implementation("com.google.android.material:material:1.12.0")
 }
