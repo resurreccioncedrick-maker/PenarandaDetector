@@ -20,7 +20,7 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
 
     private val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 2.5f * d
+        strokeWidth = 2f * d
     }
     private val chipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -52,8 +52,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
 
         for (h in heads) {
             val r = RectF(
-                h.head.left * scale + dx, h.head.top * scale + dy,
-                h.head.right * scale + dx, h.head.bottom * scale + dy
+                h.body.left * scale + dx, h.body.top * scale + dy,
+                h.body.right * scale + dx, h.body.bottom * scale + dy
             )
             val color = when {
                 h.personNumber != null -> COUNTED
@@ -62,6 +62,8 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             }
             boxPaint.color = color
             canvas.drawRoundRect(r, radius, radius, boxPaint)
+            chipPaint.color = color
+            canvas.drawCircle(h.head.centerX() * scale + dx, h.head.centerY() * scale + dy, 3f * d, chipPaint)
 
             if (h.personNumber != null) {
                 val label = h.personNumber.toString()

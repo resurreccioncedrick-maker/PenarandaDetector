@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
 class HeadCounter {
 
     /** personNumber is null until the person is counted. */
-    class Tracked(val head: RectF, val personNumber: Int?, val scanning: Boolean)
+    class Tracked(val body: RectF, val head: RectF, val personNumber: Int?, val scanning: Boolean)
 
     /** A small grey copy of the camera picture, used to follow the camera movement. */
     class Gray(val px: IntArray, val w: Int, val h: Int, val imgW: Int, val imgH: Int)
@@ -55,9 +55,10 @@ class HeadCounter {
     }
 
     /** Only draws head boxes, nothing is counted. */
-    fun previewOnly(heads: List<RectF>): List<Tracked> = heads.map { Tracked(it, null, false) }
+    fun previewOnly(dets: List<HeadDetector.Det>): List<Tracked> = dets.map { Tracked(it.body, it.head, null, false) }
 
-    fun update(heads: List<RectF>, gray: Gray, nowMs: Long): List<Tracked> {
+    fun update(dets: List<HeadDetector.Det>, gray: Gray, nowMs: Long): List<Tracked> {
+        val heads = dets.map { it.head }   // each person is followed by the position of the head
         // 1. Where is the camera now? (follow the picture movement)
         var tx = offX
         var ty = offY
@@ -69,7 +70,7 @@ class HeadCounter {
             ty += s[1] * k
         }
         // 2. Fix small errors by lining heads up with the people already counted
-        val radius = if (prev == null) Float.MAX_VALUE else max(120f, 0.1f * min(gray.imgW, gray.imgH))
+        val radius = if (prev == null) Float.MAX_VALUE else 0.12f * min(gray.imgW, gray.imgH)
         val fixed = alignWithKnownPeople(heads, tx, ty, radius)
         if (fixed != null) {
             tx = fixed[0]
@@ -121,7 +122,7 @@ class HeadCounter {
                 total++
                 p.number = total
             }
-            result.add(Tracked(box, p.number, true))
+            result.add(Tracked(dets[i].body, box, p.number, true))
         }
 
         // Heads that were seen only briefly and never counted are dropped; counted people are kept

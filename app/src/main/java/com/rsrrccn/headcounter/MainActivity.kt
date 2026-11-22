@@ -7,7 +7,6 @@ import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Matrix
-import android.graphics.RectF
 import android.net.Uri
 import android.os.Bundle
 import android.os.SystemClock
@@ -33,6 +32,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updatePadding
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.util.concurrent.Executors
@@ -54,6 +54,9 @@ class MainActivity : AppCompatActivity() {
     private val counter = HeadCounter()
     @Volatile
     private var scanning = false
+
+    @Volatile
+    private var longSide = 960      // Fast 704, Balanced 960, Precise 1280
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -89,6 +92,16 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        findViewById<MaterialButtonToggleGroup>(R.id.modeGroup).addOnButtonCheckedListener { _, id, checked ->
+            if (checked) {
+                longSide = when (id) {
+                    R.id.modeFast -> 704
+                    R.id.modePrecise -> 1280
+                    else -> 960
+                }
+                statusText.text = "Switching mode..."
+            }
+        }
         btnScan.setOnClickListener { if (scanning) stopScan() else startScan() }
         btnShow.setOnClickListener { showCount() }
         btnReset.setOnClickListener { resetCount() }
@@ -164,12 +177,23 @@ class MainActivity : AppCompatActivity() {
             val started = SystemClock.elapsedRealtime()
             val det = detector ?: HeadDetector(this).also { detector = it }
 
-            var bmp: Bitmap = proxy.toBitmap()
+            det.longSide = longSide
+
+            // Turn and shrink the camera picture to the size the model wants in ONE step
+            val src = proxy.toBitmap()
             val rotation = proxy.imageInfo.rotationDegrees
-            if (rotation != 0) {
-                val m = Matrix().apply { postRotate(rotation.toFloat()) }
-                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            val turned = rotation % 180 != 0
+            val srcW = if (turned) src.height else src.width
+            val srcH = if (turned) src.width else src.height
+            val size = det.sizeFor(srcW, srcH)
+            val m = Matrix()
+            m.postRotate(rotation.toFloat())
+            m.postScale(size[0] / srcW.toFloat(), size[1] / srcH.toFloat())
+            var bmp: Bitmap = Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+            if (bmp.width != size[0] || bmp.height != size[1]) {
+                bmp = Bitmap.createScaledBitmap(bmp, size[0], size[1], true)
             }
+            src.recycle()
             val heads = det.detect(bmp)
             val gray = if (scanning) HeadCounter.makeGray(bmp) else null
             val w = bmp.width
@@ -182,14 +206,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun onHeads(heads: List<RectF>, gray: HeadCounter.Gray?, w: Int, h: Int, nowMs: Long, ms: Long) {
+    private fun onHeads(heads: List<HeadDetector.Det>, gray: HeadCounter.Gray?, w: Int, h: Int, nowMs: Long, ms: Long) {
         if (scanning && gray != null) {
             overlay.setHeads(counter.update(heads, gray, nowMs), w, h)
             countLive.text = counter.total.toString()
             statusText.text = "Scanning  ·  ${heads.size} in view  ·  $ms ms"
         } else {
             overlay.setHeads(counter.previewOnly(heads), w, h)
-            statusText.text = "Ready  ·  ${heads.size} heads in view  ·  $ms ms"
+            statusText.text = "Ready  ·  ${heads.size} people in view  ·  $ms ms"
         }
     }
 
