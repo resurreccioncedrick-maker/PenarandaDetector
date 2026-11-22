@@ -183,18 +183,21 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnReset"
-            android:layout_width="0dp"
-            android:layout_height="52dp"
-            android:layout_weight="1"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:contentDescription="Reset"
+            android:insetLeft="0dp"
             android:insetTop="0dp"
+            android:insetRight="0dp"
             android:insetBottom="0dp"
-            android:text="Reset"
-            android:textAllCaps="false"
-            android:textSize="14sp"
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
             app:backgroundTint="@color/panel_button"
-            app:cornerRadius="26dp"
+            app:cornerRadius="28dp"
             app:icon="@drawable/ic_reset"
             app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="26dp"
             app:iconTint="#FFFFFF" />
 
         <com.google.android.material.button.MaterialButton

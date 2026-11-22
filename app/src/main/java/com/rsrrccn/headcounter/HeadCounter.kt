@@ -16,21 +16,27 @@ import kotlin.math.roundToInt
  * - People are remembered by where they are in the ROOM, not where they are on the screen.
  *   The app follows how the camera moves (by comparing the picture with the one before)
  *   and corrects the small errors by lining the heads up with the people it already counted.
- * - A person is counted after being detected CONFIRM_HITS times.
+ * - A person is counted only after being in view AND standing still for STILL_MS (3 seconds).
+ *   Someone who walks around, or who leaves the view for more than a moment, starts over.
  *
  * Works best for people who stay in place (seated or standing).
  */
 class HeadCounter {
 
     /** personNumber is null until the person is counted. */
-    class Tracked(val body: RectF, val head: RectF, val personNumber: Int?, val scanning: Boolean)
+    class Tracked(
+        val body: RectF, val head: RectF, val personNumber: Int?, val scanning: Boolean,
+        val progress: Float = 0f      // 0..1 = how much of the 3 seconds has passed
+    )
 
     /** A small grey copy of the camera picture, used to follow the camera movement. */
     class Gray(val px: IntArray, val w: Int, val h: Int, val imgW: Int, val imgH: Int)
 
     private class Person(var x: Float, var y: Float, var size: Float, var lastSeenMs: Long) {
-        var hits = 0
         var number: Int? = null
+        var anchorX = x               // where the person was when they last started standing still
+        var anchorY = y
+        var stillSinceMs = lastSeenMs
     }
 
     private val people = ArrayList<Person>()
@@ -114,18 +120,25 @@ class HeadCounter {
                 p.x = 0.3f * p.x + 0.7f * wx
                 p.y = 0.3f * p.y + 0.7f * wy
                 p.size = 0.5f * p.size + 0.5f * box.width()
+                // moved more than about one head width = walking, so the 3 seconds start again
+                if (hypot(wx - p.anchorX, wy - p.anchorY) > max(p.size, 12f)) {
+                    p.anchorX = wx
+                    p.anchorY = wy
+                    p.stillSinceMs = nowMs
+                }
             }
-            p.hits++
             p.lastSeenMs = nowMs
 
-            if (p.number == null && p.hits >= CONFIRM_HITS) {
+            val stillMs = nowMs - p.stillSinceMs
+            if (p.number == null && stillMs >= STILL_MS) {
                 total++
                 p.number = total
             }
-            result.add(Tracked(dets[i].body, box, p.number, true))
+            val progress = if (p.number != null) 1f else (stillMs / STILL_MS.toFloat()).coerceIn(0f, 1f)
+            result.add(Tracked(dets[i].body, box, p.number, true, progress))
         }
 
-        // Heads that were seen only briefly and never counted are dropped; counted people are kept
+        // Someone not seen for a moment starts over; people already counted are always kept
         people.removeAll { it.number == null && nowMs - it.lastSeenMs > UNCONFIRMED_MS }
         return result
     }
@@ -255,8 +268,8 @@ class HeadCounter {
     }
 
     companion object {
-        const val CONFIRM_HITS = 3        // detections needed before a person is counted
-        const val UNCONFIRMED_MS = 2500L
+        const val STILL_MS = 3000L        // must be in view and standing still this long to be counted
+        const val UNCONFIRMED_MS = 1000L  // a gap longer than this means "not in view"
 
         /** Makes the small grey picture used to follow the camera movement. */
         fun makeGray(bmp: Bitmap): Gray {

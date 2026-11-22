@@ -210,7 +210,7 @@ class MainActivity : AppCompatActivity() {
         if (scanning && gray != null) {
             overlay.setHeads(counter.update(heads, gray, nowMs), w, h)
             countLive.text = counter.total.toString()
-            statusText.text = "Scanning  ·  ${heads.size} in view  ·  $ms ms"
+            statusText.text = "Scanning  ·  ${heads.size} in view  ·  hold 3s to count"
         } else {
             overlay.setHeads(counter.previewOnly(heads), w, h)
             statusText.text = "Ready  ·  ${heads.size} people in view  ·  $ms ms"

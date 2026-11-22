@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.ceil
 import kotlin.math.max
 
 /** Draws the head boxes on top of the camera preview. */
@@ -65,8 +66,12 @@ class OverlayView(context: Context, attrs: AttributeSet? = null) : View(context,
             chipPaint.color = color
             canvas.drawCircle(h.head.centerX() * scale + dx, h.head.centerY() * scale + dy, 3f * d, chipPaint)
 
-            if (h.personNumber != null) {
-                val label = h.personNumber.toString()
+            val label: String? = when {
+                h.personNumber != null -> h.personNumber.toString()
+                h.scanning -> "${ceil((1f - h.progress) * HeadCounter.STILL_MS / 1000f).toInt()}s"   // seconds left
+                else -> null
+            }
+            if (label != null) {
                 val cw = max(16f * d, textPaint.measureText(label) + 8f * d)
                 val ch = 14f * d
                 val chip = RectF(r.centerX() - cw / 2f, r.top - ch - 2f * d, r.centerX() + cw / 2f, r.top - 2f * d)
