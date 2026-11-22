@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.HeadCounter" parent="Theme.AppCompat.Light.NoActionBar" />
+</resources>
