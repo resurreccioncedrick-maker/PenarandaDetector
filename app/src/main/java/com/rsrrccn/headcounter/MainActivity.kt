@@ -35,7 +35,9 @@ import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
 import kotlin.math.max
 import kotlin.math.min
 
@@ -48,7 +50,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnShow: Button
     private lateinit var btnReset: Button
 
-    private var detector: ObjectDetector? = null
+    // Several detectors run at the same time (one per worker thread) so the zoomed tiles are scanned in parallel
+    private val workerCount = 4
+    private val detectors = ArrayList<ObjectDetector>()
+    private val freeDetectors = LinkedBlockingQueue<ObjectDetector>()
+    private val workers = Executors.newFixedThreadPool(workerCount)
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val counter = HeadCounter()
     private var scanning = false
@@ -91,7 +97,11 @@ class MainActivity : AppCompatActivity() {
             .setMaxResults(50)
             .setCategoryAllowlist(listOf("person"))
             .build()
-        detector = ObjectDetector.createFromOptions(this, options)
+        repeat(workerCount) {
+            val d = ObjectDetector.createFromOptions(this, options)
+            detectors.add(d)
+            freeDetectors.add(d)
+        }
 
         btnScan.setOnClickListener { if (scanning) stopScan() else startScan() }
         btnShow.setOnClickListener { showCount() }
@@ -164,18 +174,19 @@ class MainActivity : AppCompatActivity() {
     /** Runs on a background thread for every camera frame. */
     private fun analyze(proxy: ImageProxy) {
         try {
-            val det = detector ?: return
+            val started = SystemClock.elapsedRealtime()
             var bmp: Bitmap = proxy.toBitmap()
             val rotation = proxy.imageInfo.rotationDegrees
             if (rotation != 0) {
                 val m = Matrix().apply { postRotate(rotation.toFloat()) }
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
             }
-            val persons = detectPeople(det, bmp)
+            val persons = detectPeople(bmp)
             val w = bmp.width
             val h = bmp.height
             val now = SystemClock.elapsedRealtime()
-            runOnUiThread { onPersons(persons, w, h, now) }
+            val ms = now - started
+            runOnUiThread { onPersons(persons, w, h, now, ms) }
         } finally {
             proxy.close()
         }
@@ -185,12 +196,9 @@ class MainActivity : AppCompatActivity() {
 
     private class Hit(val box: RectF, val score: Float)
 
-    private fun detectPeople(det: ObjectDetector, bmp: Bitmap): List<RectF> {
+    private fun detectPeople(bmp: Bitmap): List<RectF> {
         val w = bmp.width
         val h = bmp.height
-        val hits = ArrayList<Hit>()
-        hits.addAll(detectIn(det, bmp, 0, 0, w, h, w, h))
-
         val cols = 3
         val rows = 3
         val overlap = 0.3f
@@ -198,13 +206,30 @@ class MainActivity : AppCompatActivity() {
         val th = (h / (1f + (rows - 1) * (1f - overlap))).toInt()
         val stepX = (tw * (1f - overlap)).toInt()
         val stepY = (th * (1f - overlap)).toInt()
+
+        // Each job = one area to scan: x, y, width, height
+        val areas = ArrayList<IntArray>()
+        areas.add(intArrayOf(0, 0, w, h))
         for (r in 0 until rows) {
             for (c in 0 until cols) {
                 val x = if (c == cols - 1) w - tw else c * stepX
                 val y = if (r == rows - 1) h - th else r * stepY
-                hits.addAll(detectIn(det, bmp, x, y, tw, th, w, h))
+                areas.add(intArrayOf(x, y, tw, th))
             }
         }
+
+        val jobs = areas.map { a ->
+            Callable {
+                val det = freeDetectors.take()
+                try {
+                    detectIn(det, bmp, a[0], a[1], a[2], a[3], w, h)
+                } finally {
+                    freeDetectors.put(det)
+                }
+            }
+        }
+        val hits = ArrayList<Hit>()
+        for (f in workers.invokeAll(jobs)) hits.addAll(f.get())
         return removeDuplicates(hits)
     }
 
@@ -248,13 +273,13 @@ class MainActivity : AppCompatActivity() {
         return inter / (areaA + areaB - inter) > 0.45f || inter / min(areaA, areaB) > 0.8f
     }
 
-    private fun onPersons(persons: List<RectF>, w: Int, h: Int, nowMs: Long) {
+    private fun onPersons(persons: List<RectF>, w: Int, h: Int, nowMs: Long, ms: Long) {
         if (scanning) {
             overlay.setHeads(counter.update(persons, nowMs), w, h)
-            statusText.text = "Scanning...  in view: ${persons.size}   counted: ${counter.total}"
+            statusText.text = "Scanning...  in view: ${persons.size}   counted: ${counter.total}   (${ms} ms)"
         } else {
             overlay.setHeads(counter.previewOnly(persons), w, h)
-            statusText.text = "Ready  -  heads in view: ${persons.size}"
+            statusText.text = "Ready  -  heads in view: ${persons.size}   (${ms} ms)"
         }
     }
 
@@ -296,6 +321,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         analysisExecutor.shutdown()
-        detector?.close()
+        workers.shutdown()
+        detectors.forEach { it.close() }
     }
 }
