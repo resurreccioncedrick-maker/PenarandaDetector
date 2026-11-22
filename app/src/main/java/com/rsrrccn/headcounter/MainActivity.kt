@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private var detector: HeadDetector? = null
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val counter = HeadCounter()
+    @Volatile
     private var scanning = false
 
     private val permissionLauncher =
@@ -170,19 +171,20 @@ class MainActivity : AppCompatActivity() {
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
             }
             val heads = det.detect(bmp)
+            val gray = if (scanning) HeadCounter.makeGray(bmp) else null
             val w = bmp.width
             val h = bmp.height
             val now = SystemClock.elapsedRealtime()
             val ms = now - started
-            runOnUiThread { onHeads(heads, w, h, now, ms) }
+            runOnUiThread { onHeads(heads, gray, w, h, now, ms) }
         } finally {
             proxy.close()
         }
     }
 
-    private fun onHeads(heads: List<RectF>, w: Int, h: Int, nowMs: Long, ms: Long) {
-        if (scanning) {
-            overlay.setHeads(counter.update(heads, nowMs), w, h)
+    private fun onHeads(heads: List<RectF>, gray: HeadCounter.Gray?, w: Int, h: Int, nowMs: Long, ms: Long) {
+        if (scanning && gray != null) {
+            overlay.setHeads(counter.update(heads, gray, nowMs), w, h)
             countLive.text = counter.total.toString()
             statusText.text = "Scanning  ·  ${heads.size} in view  ·  $ms ms"
         } else {
@@ -194,6 +196,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- Buttons ----------
 
     private fun startScan() {
+        counter.beginScan()
         scanning = true
         scanProgress.visibility = View.VISIBLE
         btnScan.text = "Stop scan"
