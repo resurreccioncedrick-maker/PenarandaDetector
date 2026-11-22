@@ -40,7 +40,7 @@ val downloadModel by tasks.registering {
             modelFile.parentFile.mkdirs()
             val url = "https://storage.googleapis.com/mediapipe-models/object_detector/" +
                 "efficientdet_lite0/float16/1/efficientdet_lite0.tflite"
-            java.net.URL(url).openStream().use { input ->
+            uri(url).toURL().openStream().use { input ->
                 modelFile.outputStream().use { out -> input.copyTo(out) }
             }
         }
