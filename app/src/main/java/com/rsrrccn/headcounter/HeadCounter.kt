@@ -53,7 +53,7 @@ class HeadCounter {
             val py = t.box.centerY() + t.vy
             for ((i, d) in persons.withIndex()) {
                 val dist = hypot(d.centerX() - px, d.centerY() - py)
-                val limit = max(d.width(), t.box.width()) * 0.8f
+                val limit = max(max(d.width(), d.height()), max(t.box.width(), t.box.height())) * 0.6f
                 if (dist < limit) pairs.add(Pair(t, i, dist))
             }
         }
@@ -102,8 +102,8 @@ class HeadCounter {
     }
 
     companion object {
-        const val CONFIRM_FRAMES = 5      // steady detection needed before counting
-        const val LOST_MS = 4000L         // counted people are remembered this long
-        const val UNCONFIRMED_MS = 1000L
+        const val CONFIRM_FRAMES = 3      // steady detection needed before counting
+        const val LOST_MS = 8000L         // counted people are remembered this long
+        const val UNCONFIRMED_MS = 2500L
     }
 }

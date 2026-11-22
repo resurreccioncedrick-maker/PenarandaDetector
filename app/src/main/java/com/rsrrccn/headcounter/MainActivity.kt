@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.RectF
 import android.net.Uri
+import android.util.Size
+import android.view.View
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
@@ -18,15 +20,24 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
 import java.util.concurrent.Executors
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
 
@@ -59,11 +70,25 @@ class MainActivity : AppCompatActivity() {
         btnReset = findViewById(R.id.btnReset)
         previewView.keepScreenOn = true
 
+        // Keep the top text and bottom buttons clear of the status bar / navigation bar
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val bottomBar = findViewById<View>(R.id.bottomBar)
+        val topPad = statusText.paddingTop
+        val bottomPad = bottomBar.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.root)) { _, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            statusText.updatePadding(top = topPad + bars.top)
+            bottomBar.updatePadding(bottom = bottomPad + bars.bottom)
+            insets
+        }
+
         val options = ObjectDetector.ObjectDetectorOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite0.tflite").build())
             .setRunningMode(RunningMode.IMAGE)
-            .setScoreThreshold(0.35f)
-            .setMaxResults(40)
+            .setScoreThreshold(0.25f)
+            .setMaxResults(50)
             .setCategoryAllowlist(listOf("person"))
             .build()
         detector = ObjectDetector.createFromOptions(this, options)
@@ -119,6 +144,17 @@ class MainActivity : AppCompatActivity() {
         val controller = LifecycleCameraController(this)
         controller.setEnabledUseCases(CameraController.IMAGE_ANALYSIS)
         controller.cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+        controller.setImageAnalysisResolutionSelector(
+            ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        Size(1440, 1080),
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                    )
+                )
+                .build()
+        )
         controller.imageAnalysisOutputImageFormat = ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888
         controller.setImageAnalysisAnalyzer(analysisExecutor) { proxy -> analyze(proxy) }
         controller.bindToLifecycle(this)
@@ -135,8 +171,7 @@ class MainActivity : AppCompatActivity() {
                 val m = Matrix().apply { postRotate(rotation.toFloat()) }
                 bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
             }
-            val result = det.detect(BitmapImageBuilder(bmp).build())
-            val persons = result.detections().map { RectF(it.boundingBox()) }
+            val persons = detectPeople(det, bmp)
             val w = bmp.width
             val h = bmp.height
             val now = SystemClock.elapsedRealtime()
@@ -144,6 +179,73 @@ class MainActivity : AppCompatActivity() {
         } finally {
             proxy.close()
         }
+    }
+
+    // ---------- Detection (whole picture + 9 zoomed-in tiles, so small far-away heads are found) ----------
+
+    private class Hit(val box: RectF, val score: Float)
+
+    private fun detectPeople(det: ObjectDetector, bmp: Bitmap): List<RectF> {
+        val w = bmp.width
+        val h = bmp.height
+        val hits = ArrayList<Hit>()
+        hits.addAll(detectIn(det, bmp, 0, 0, w, h, w, h))
+
+        val cols = 3
+        val rows = 3
+        val overlap = 0.3f
+        val tw = (w / (1f + (cols - 1) * (1f - overlap))).toInt()
+        val th = (h / (1f + (rows - 1) * (1f - overlap))).toInt()
+        val stepX = (tw * (1f - overlap)).toInt()
+        val stepY = (th * (1f - overlap)).toInt()
+        for (r in 0 until rows) {
+            for (c in 0 until cols) {
+                val x = if (c == cols - 1) w - tw else c * stepX
+                val y = if (r == rows - 1) h - th else r * stepY
+                hits.addAll(detectIn(det, bmp, x, y, tw, th, w, h))
+            }
+        }
+        return removeDuplicates(hits)
+    }
+
+    private fun detectIn(
+        det: ObjectDetector, bmp: Bitmap,
+        x: Int, y: Int, tw: Int, th: Int, fullW: Int, fullH: Int
+    ): List<Hit> {
+        val crop = if (tw == bmp.width && th == bmp.height) bmp else Bitmap.createBitmap(bmp, x, y, tw, th)
+        val out = ArrayList<Hit>()
+        val m = 4f
+        for (d in det.detect(BitmapImageBuilder(crop).build()).detections()) {
+            val b = d.boundingBox()
+            // Skip people cut off by the edge of a tile (the neighbouring tile sees them whole)
+            if (x > 0 && b.left < m) continue
+            if (y > 0 && b.top < m) continue
+            if (x + tw < fullW && b.right > tw - m) continue
+            if (y + th < fullH && b.bottom > th - m) continue
+            if (b.width() < 8f) continue
+            out.add(
+                Hit(RectF(b.left + x, b.top + y, b.right + x, b.bottom + y), d.categories()[0].score())
+            )
+        }
+        return out
+    }
+
+    private fun removeDuplicates(hits: List<Hit>): List<RectF> {
+        val kept = ArrayList<Hit>()
+        for (hit in hits.sortedByDescending { it.score }) {
+            if (kept.none { sameBox(it.box, hit.box) }) kept.add(hit)
+        }
+        return kept.map { it.box }
+    }
+
+    private fun sameBox(a: RectF, b: RectF): Boolean {
+        val iw = min(a.right, b.right) - max(a.left, b.left)
+        val ih = min(a.bottom, b.bottom) - max(a.top, b.top)
+        if (iw <= 0f || ih <= 0f) return false
+        val inter = iw * ih
+        val areaA = a.width() * a.height()
+        val areaB = b.width() * b.height()
+        return inter / (areaA + areaB - inter) > 0.45f || inter / min(areaA, areaB) > 0.8f
     }
 
     private fun onPersons(persons: List<RectF>, w: Int, h: Int, nowMs: Long) {
